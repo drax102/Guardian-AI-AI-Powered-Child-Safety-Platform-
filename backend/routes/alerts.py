@@ -1,7 +1,6 @@
 from fastapi import APIRouter
-from backend.database import db
-from backend.models.alert import Alert
-
+from database import db
+from models.alert import Alert
 router=APIRouter()
 
 alerts=db["alerts"]
