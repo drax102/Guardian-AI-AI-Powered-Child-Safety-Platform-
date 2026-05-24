@@ -1,34 +1,43 @@
 from fastapi import APIRouter
 from database import db
 from models.alert import Alert
-router=APIRouter()
 
-alerts=db["alerts"]
+router = APIRouter()
+
+alerts = db["alerts"]
 
 
 @router.post("/alert")
-
 def create_alert(alert: Alert):
 
-    alerts.insert_one(
-        alert.model_dump()
-    )
+    data = alert.model_dump()
+
+    alerts.insert_one(data)
 
     return {
-        "status":"saved"
+        "status": "saved"
     }
 
 
 @router.get("/alerts")
-
 def get_alerts():
 
-    result=[]
+    try:
 
-    for x in alerts.find():
+        result = []
 
-        x["_id"]=str(x["_id"])
+        for item in alerts.find():
 
-        result.append(x)
+            item["_id"] = str(
+                item["_id"]
+            )
 
-    return result
+            result.append(item)
+
+        return result
+
+    except Exception as e:
+
+        return {
+            "error": str(e)
+        }
