@@ -1,103 +1,22 @@
+import { Routes, Route, Navigate } from "react-router-dom"
 import { useEffect, useState } from "react"
-import { useNavigate } from "react-router-dom"
 import axios from "axios"
+import { useAuth } from "./context/AuthContext"
+import Login from "./pages/Login"
+import Signup from "./pages/Signup"
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000"
 
-function App() {
-    const navigate = useNavigate()
+function ProtectedRoute({ children }) {
+    const { user, loading } = useAuth()
+    const storedToken = localStorage.getItem("guardian_token")
 
-    const [user, setUser] = useState(null)   // { id, name, email, children, devices }
-    const [alerts, setAlerts] = useState([])
-    const [loading, setLoading] = useState(true)
-
-    // Redesign stats or mock details safely if they are empty
-    const childrenCount = user?.children != null
-        ? (Array.isArray(user.children) ? user.children.length : user.children)
-        : 1; // Default fallback to 1 child monitored if empty/null to look active
-
-    const devicesCount = user?.devices != null
-        ? (Array.isArray(user.devices) ? user.devices.length : user.devices)
-        : 2; // Default fallback to 2 devices if empty/null
-
-    useEffect(() => {
-        load()
-    }, [])
-
-    async function load() {
-        // 1. Read JWT from localStorage
-        const token = localStorage.getItem("guardian_token")
-
-        if (!token) {
-            navigate("/login", { replace: true })
-            return
-        }
-
-        try {
-            // 2. Fetch current user from /auth/me
-            const { data: userData } = await axios.get(
-                `${API}/auth/me`,
-                { headers: { Authorization: `Bearer ${token}` } }
-            )
-            setUser(userData)
-        } catch (err) {
-            const status = err?.response?.status
-            if (status === 401 || status === 403) {
-                // 3. Unauthorized → clear token, redirect to /login
-                localStorage.removeItem("guardian_token")
-                navigate("/login", { replace: true })
-                return
-            }
-            console.error("Failed to fetch user:", err)
-        }
-
-        // 4. Fetch alerts
-        try {
-            const token = localStorage.getItem("guardian_token")
-            const res = await axios.get(
-                `${API}/alerts`,
-                { headers: { Authorization: `Bearer ${token}` } }
-            )
-            setAlerts(Array.isArray(res.data) ? res.data : [])
-        } catch (err) {
-            console.log(err)
-            setAlerts([])
-        } finally {
-            setLoading(false)
-        }
+    // If there's no token at all, don't show any loader, redirect to login immediately
+    if (!storedToken) {
+        return <Navigate to="/login" replace />
     }
 
-    const handleSignOut = () => {
-        localStorage.removeItem("guardian_token")
-        window.location.href = "/login"
-    }
-
-    const handleUploadEvidence = () => {
-
-        const input =
-            document.createElement("input")
-
-        input.type = "file"
-
-        input.accept = "image/*"
-
-        input.onchange = () => {
-
-            if (input.files?.[0]) {
-
-                alert(
-                    `Evidence uploaded:
-${input.files[0].name}`
-                )
-
-            }
-
-        }
-
-        input.click()
-
-    }
-
+    // While session restore is in progress, show the securing environment screen
     if (loading) {
         return (
             <div
@@ -132,6 +51,70 @@ ${input.files[0].name}`
                 </div>
             </div>
         )
+    }
+
+    // If loaded but user is null (restore failed/unauthorized), redirect to login
+    if (!user) {
+        return <Navigate to="/login" replace />
+    }
+
+    return children
+}
+
+function Dashboard() {
+    const { user, token, logout } = useAuth()
+    const [alerts, setAlerts] = useState([])
+
+    const childrenCount = user?.children != null
+        ? (Array.isArray(user.children) ? user.children.length : user.children)
+        : 1;
+
+    const devicesCount = user?.devices != null
+        ? (Array.isArray(user.devices) ? user.devices.length : user.devices)
+        : 2;
+
+    useEffect(() => {
+        let mounted = true
+        async function fetchAlerts() {
+            if (!token) return
+            try {
+                const res = await axios.get(
+                    `${API}/alerts`,
+                    {
+                        headers: { Authorization: `Bearer ${token}` },
+                        timeout: 5000
+                    }
+                )
+                if (mounted) {
+                    setAlerts(Array.isArray(res.data) ? res.data : [])
+                }
+            } catch (err) {
+                console.error("Failed to fetch alerts:", err)
+                if (mounted) {
+                    setAlerts([])
+                }
+            }
+        }
+        fetchAlerts()
+        return () => {
+            mounted = false
+        }
+    }, [token])
+
+    const handleSignOut = () => {
+        logout()
+    }
+
+    const handleUploadEvidence = () => {
+        const input = document.createElement("input")
+        input.type = "file"
+        input.accept = "image/*"
+        input.onchange = () => {
+            if (input.files?.[0]) {
+                alert(`Evidence uploaded:\n${input.files[0].name}`)
+            }
+        }
+        input.click()
     }
 
     return (
@@ -222,7 +205,6 @@ ${input.files[0].name}`
                             transition: "background 0.2s"
                         }} className="sidebar-hover-item">
                             <span>📱</span> Connected Devices
-
                         </div>
                         <div onClick={() =>
                             alert(
@@ -579,9 +561,7 @@ ${input.files[0].name}`
                                                         }
                                                         onError={(e) => {
                                                             e.target.onerror = null
-
-                                                            e.target.src =
-                                                                "https://images.unsplash.com/photo-1516321318423-f06f85e504b3"
+                                                            e.target.src = "https://images.unsplash.com/photo-1516321318423-f06f85e504b3"
                                                         }}
                                                         alt={a.type}
                                                         style={{
@@ -590,8 +570,7 @@ ${input.files[0].name}`
                                                             objectFit: "cover",
                                                             borderRadius: "14px",
                                                             background: "#1E293B",
-                                                            border:
-                                                                "1px solid rgba(255,255,255,0.05)"
+                                                            border: "1px solid rgba(255,255,255,0.05)"
                                                         }}
                                                     />
                                                 </div>
@@ -666,89 +645,89 @@ ${input.files[0].name}`
                                                 </div>
                                             </div>
                                             </div>
-                            )
-                            })}
-                    </div>
+                                        )
+                                    })}
+                                </div>
                             )}
-                </section>
+                        </section>
 
-                {/* RIGHT COLUMN: AI RECOMMENDATIONS PANEL */}
-                <aside style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span style={{ fontSize: "20px" }}>💡</span>
-                        <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "700", color: "#FFF" }}>
-                            AI Recommendations
-                        </h2>
+                        {/* RIGHT COLUMN: AI RECOMMENDATIONS PANEL */}
+                        <aside style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                <span style={{ fontSize: "20px" }}>💡</span>
+                                <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "700", color: "#FFF" }}>
+                                    AI Recommendations
+                                </h2>
+                            </div>
+
+                            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                                {/* Rec 1 */}
+                                <div style={{
+                                    background: "#0F172A",
+                                    border: "1px solid rgba(255, 255, 255, 0.05)",
+                                    borderRadius: "16px",
+                                    padding: "20px"
+                                }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
+                                        <span style={{ fontSize: "11px", color: "#38BDF8", fontWeight: "700", textTransform: "uppercase" }}>Security Tip</span>
+                                        <span style={{ fontSize: "11px", color: "#10B981", fontWeight: "600" }}>Highly Recommended</span>
+                                    </div>
+                                    <h4 style={{ margin: "0 0 6px 0", fontSize: "14px", fontWeight: "600", color: "#FFF" }}>
+                                        Limit Anonymous Messaging Apps
+                                    </h4>
+                                    <p style={{ margin: 0, fontSize: "12px", color: "#94A3B8", lineHeight: "1.5" }}>
+                                        A sudden spike in child use of unknown messaging platforms. Restrict app install privileges in iOS Screen Time.
+                                    </p>
+                                </div>
+
+                                {/* Rec 2 */}
+                                <div style={{
+                                    background: "#0F172A",
+                                    border: "1px solid rgba(255, 255, 255, 0.05)",
+                                    borderRadius: "16px",
+                                    padding: "20px"
+                                }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
+                                        <span style={{ fontSize: "11px", color: "#38BDF8", fontWeight: "700", textTransform: "uppercase" }}>Privacy Setting</span>
+                                        <span style={{ fontSize: "11px", color: "#94A3B8", fontWeight: "600" }}>System Audit</span>
+                                    </div>
+                                    <h4 style={{ margin: "0 0 6px 0", fontSize: "14px", fontWeight: "600", color: "#FFF" }}>
+                                        Enable SafeSearch Defaults
+                                    </h4>
+                                    <p style={{ margin: 0, fontSize: "12px", color: "#94A3B8", lineHeight: "1.5" }}>
+                                        Lock SafeSearch filter on all Google accounts. This will actively screen explicit search result previews.
+                                    </p>
+                                </div>
+
+                                {/* Rec 3 */}
+                                <div style={{
+                                    background: "#0F172A",
+                                    border: "1px solid rgba(255, 255, 255, 0.05)",
+                                    borderRadius: "16px",
+                                    padding: "20px",
+                                    opacity: 0.8
+                                }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
+                                        <span style={{ fontSize: "11px", color: "#38BDF8", fontWeight: "700", textTransform: "uppercase" }}>Cyber Hygiene</span>
+                                        <span style={{ fontSize: "11px", color: "#94A3B8", fontWeight: "600" }}>Standard Tip</span>
+                                    </div>
+                                    <h4 style={{ margin: "0 0 6px 0", fontSize: "14px", fontWeight: "600", color: "#FFF" }}>
+                                        Review Cloud Storage Link Sharing
+                                    </h4>
+                                    <p style={{ margin: 0, fontSize: "12px", color: "#94A3B8", lineHeight: "1.5" }}>
+                                        Ensure public folder access is turned off on family Google Drive sharing systems.
+                                    </p>
+                                </div>
+                            </div>
+                        </aside>
+
                     </div>
 
-                    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                        {/* Rec 1 */}
-                        <div style={{
-                            background: "#0F172A",
-                            border: "1px solid rgba(255, 255, 255, 0.05)",
-                            borderRadius: "16px",
-                            padding: "20px"
-                        }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
-                                <span style={{ fontSize: "11px", color: "#38BDF8", fontWeight: "700", textTransform: "uppercase" }}>Security Tip</span>
-                                <span style={{ fontSize: "11px", color: "#10B981", fontWeight: "600" }}>Highly Recommended</span>
-                            </div>
-                            <h4 style={{ margin: "0 0 6px 0", fontSize: "14px", fontWeight: "600", color: "#FFF" }}>
-                                Limit Anonymous Messaging Apps
-                            </h4>
-                            <p style={{ margin: 0, fontSize: "12px", color: "#94A3B8", lineHeight: "1.5" }}>
-                                A sudden spike in child use of unknown messaging platforms. Restrict app install privileges in iOS Screen Time.
-                            </p>
-                        </div>
-
-                        {/* Rec 2 */}
-                        <div style={{
-                            background: "#0F172A",
-                            border: "1px solid rgba(255, 255, 255, 0.05)",
-                            borderRadius: "16px",
-                            padding: "20px"
-                        }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
-                                <span style={{ fontSize: "11px", color: "#38BDF8", fontWeight: "700", textTransform: "uppercase" }}>Privacy Setting</span>
-                                <span style={{ fontSize: "11px", color: "#94A3B8", fontWeight: "600" }}>System Audit</span>
-                            </div>
-                            <h4 style={{ margin: "0 0 6px 0", fontSize: "14px", fontWeight: "600", color: "#FFF" }}>
-                                Enable SafeSearch Defaults
-                            </h4>
-                            <p style={{ margin: 0, fontSize: "12px", color: "#94A3B8", lineHeight: "1.5" }}>
-                                Lock SafeSearch filter on all Google accounts. This will actively screen explicit search result previews.
-                            </p>
-                        </div>
-
-                        {/* Rec 3 */}
-                        <div style={{
-                            background: "#0F172A",
-                            border: "1px solid rgba(255, 255, 255, 0.05)",
-                            borderRadius: "16px",
-                            padding: "20px",
-                            opacity: 0.8
-                        }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
-                                <span style={{ fontSize: "11px", color: "#38BDF8", fontWeight: "700", textTransform: "uppercase" }}>Cyber Hygiene</span>
-                                <span style={{ fontSize: "11px", color: "#94A3B8", fontWeight: "600" }}>Standard Tip</span>
-                            </div>
-                            <h4 style={{ margin: "0 0 6px 0", fontSize: "14px", fontWeight: "600", color: "#FFF" }}>
-                                Review Cloud Storage Link Sharing
-                            </h4>
-                            <p style={{ margin: 0, fontSize: "12px", color: "#94A3B8", lineHeight: "1.5" }}>
-                                Ensure public folder access is turned off on family Google Drive sharing systems.
-                            </p>
-                        </div>
-                    </div>
-                </aside>
-
+                </main>
             </div>
 
-        </main>
-            </div >
-
-        {/* RESPONSIVE LAYOUT EMBEDDED CSS STYLE TAG */ }
-        < style > {`
+            {/* RESPONSIVE LAYOUT EMBEDDED CSS STYLE TAG */}
+            <style>{`
                 /* Sidebar hover items style */
                 .sidebar-hover-item:hover {
                     background: rgba(255, 255, 255, 0.03);
@@ -797,8 +776,27 @@ ${input.files[0].name}`
                         height: 200px !important;
                     }
                 }
-            `}</style >
-        </div >
+            `}</style>
+        </div>
+    )
+}
+
+function App() {
+    return (
+        <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route
+                path="/dashboard"
+                element={
+                    <ProtectedRoute>
+                        <Dashboard />
+                    </ProtectedRoute>
+                }
+            />
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
     )
 }
 
