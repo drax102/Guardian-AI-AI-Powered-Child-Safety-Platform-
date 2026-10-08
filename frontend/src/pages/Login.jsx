@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { useNavigate, Link } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
+import { getErrorMessage } from "../services/api"
 import "../styles/Login.css"
 
 /* Google "G" logo SVG — inline so no extra asset needed */
@@ -38,7 +39,7 @@ export default function Login() {
       await login(form.email, form.password)
       navigate("/dashboard", { replace: true })
     } catch (err) {
-      setError(err?.response?.data?.detail || "Invalid email or password.")
+      setError(getErrorMessage(err))
     } finally {
       setBusy(false)
     }

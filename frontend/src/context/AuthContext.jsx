@@ -3,36 +3,50 @@ import {
   useContext,
   useState,
   useEffect,
-  useCallback
+  useCallback,
 } from "react"
-import axios from "axios"
-
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000"
+import api, {
+  getAccessToken,
+  getRefreshToken,
+  setTokens,
+  clearTokens,
+  getErrorMessage,
+} from "../services/api"
+import { connectSocket, disconnectSocket } from "../services/socket"
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
-  const [token, setToken] = useState(localStorage.getItem("guardian_token"))
+  const [token, setToken] = useState(getAccessToken())
   const [loading, setLoading] = useState(true)
 
-  // Save Token
-  const saveToken = useCallback((t) => {
-    setToken(t)
-    if (t) {
-      localStorage.setItem("guardian_token", t)
-    } else {
-      localStorage.removeItem("guardian_token")
-    }
+  // Centralized session teardown
+  const handleSessionTeardown = useCallback(() => {
+    disconnectSocket()
+    clearTokens()
+    setUser(null)
+    setToken(null)
   }, [])
 
-  // Session restore flow with safety checks
+  // Synchronize Socket.IO client with authenticated user session
+  useEffect(() => {
+    if (token && user) {
+      connectSocket(token)
+    } else {
+      disconnectSocket()
+    }
+  }, [token, user])
+
+  // Session restore flow on application mount
   useEffect(() => {
     let mounted = true
 
-    async function restore() {
-      const storedToken = localStorage.getItem("guardian_token")
-      if (!storedToken) {
+    async function restoreSession() {
+      const storedRefreshToken = getRefreshToken()
+      const storedAccessToken = getAccessToken()
+
+      if (!storedRefreshToken && !storedAccessToken) {
         if (mounted) {
           setUser(null)
           setLoading(false)
@@ -41,20 +55,37 @@ export function AuthProvider({ children }) {
       }
 
       try {
-        const res = await axios.get(`${API}/auth/me`, {
-          headers: { Authorization: `Bearer ${storedToken}` },
-          timeout: 5000
-        })
+        // If refresh token exists, attempt refresh first to verify validity & get fresh access token
+        if (storedRefreshToken) {
+          try {
+            const refreshRes = await api.post("/auth/refresh", {
+              refreshToken: storedRefreshToken,
+            })
+            const { accessToken: newAccess, refreshToken: newRefresh } =
+              refreshRes.data?.data || {}
+            if (newAccess) {
+              setTokens(newAccess, newRefresh)
+              if (mounted) setToken(newAccess)
+            }
+          } catch (refreshErr) {
+            console.warn("Initial refresh attempt failed, trying existing access token...", refreshErr)
+          }
+        }
 
-        if (mounted) {
-          setUser(res.data)
+        // Fetch current authenticated user profile
+        const meRes = await api.get("/auth/me")
+        const userData = meRes.data?.data?.user || meRes.data?.user || null
+
+        if (mounted && userData) {
+          setUser(userData)
+          setToken(getAccessToken())
+        } else if (mounted) {
+          handleSessionTeardown()
         }
       } catch (err) {
-        console.error("Auth restore failed:", err)
-        localStorage.removeItem("guardian_token")
+        console.error("Session restore failed:", getErrorMessage(err))
         if (mounted) {
-          setUser(null)
-          setToken(null)
+          handleSessionTeardown()
         }
       } finally {
         if (mounted) {
@@ -63,52 +94,72 @@ export function AuthProvider({ children }) {
       }
     }
 
-    restore()
+    restoreSession()
+
+    // Listen for session expiry triggered by API response interceptor
+    const onSessionExpired = () => {
+      handleSessionTeardown()
+    }
+    window.addEventListener("guardian:session-expired", onSessionExpired)
 
     return () => {
       mounted = false
+      window.removeEventListener("guardian:session-expired", onSessionExpired)
     }
-  }, [])
+  }, [handleSessionTeardown])
 
   // Signup
-  async function signup(name, email, password) {
-    const { data } = await axios.post(`${API}/auth/signup`, {
+  const signup = useCallback(async (name, email, password) => {
+    const res = await api.post("/auth/signup", {
       name,
       email,
-      password
+      password,
     })
-    saveToken(data.token)
+
+    const data = res.data?.data
+    if (!data || !data.accessToken || !data.user) {
+      throw new Error("Invalid signup response from server")
+    }
+
+    setTokens(data.accessToken, data.refreshToken)
+    setToken(data.accessToken)
     setUser(data.user)
+    setLoading(false)
     return data.user
-  }
+  }, [])
 
   // Login
-  async function login(email, password) {
-    const { data } = await axios.post(`${API}/auth/login`, {
+  const login = useCallback(async (email, password) => {
+    const res = await api.post("/auth/login", {
       email,
-      password
+      password,
     })
-    saveToken(data.token)
+
+    const data = res.data?.data
+    if (!data || !data.accessToken || !data.user) {
+      throw new Error("Invalid login response from server")
+    }
+
+    setTokens(data.accessToken, data.refreshToken)
+    setToken(data.accessToken)
     setUser(data.user)
+    setLoading(false)
     return data.user
-  }
+  }, [])
 
   // Logout
-  const logout = useCallback(() => {
-    saveToken(null)
-    setUser(null)
-    window.location.href = "/login"
-  }, [saveToken])
-
-  // Auth Axios helper
-  const authAxios = useCallback(() => {
-    return axios.create({
-      baseURL: API,
-      headers: {
-        Authorization: `Bearer ${token}`
+  const logout = useCallback(async () => {
+    const refreshToken = getRefreshToken()
+    if (refreshToken) {
+      try {
+        await api.post("/auth/logout", { refreshToken })
+      } catch (err) {
+        console.warn("Server logout notification failed:", err)
       }
-    })
-  }, [token])
+    }
+    handleSessionTeardown()
+    window.location.href = "/login"
+  }, [handleSessionTeardown])
 
   return (
     <AuthContext.Provider
@@ -119,7 +170,7 @@ export function AuthProvider({ children }) {
         signup,
         login,
         logout,
-        authAxios
+        setUser,
       }}
     >
       {children}
