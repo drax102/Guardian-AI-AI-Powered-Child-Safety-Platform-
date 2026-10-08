@@ -1,0 +1,194 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  PARENT
+  GUARDIAN
+  ADMIN
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AlertType {
+  CYBERBULLYING
+  EXPLICIT_CONTENT
+  STRANGER_DANGER
+  SUSPICIOUS_MESSAGING
+  ONLINE_PREDATION
+  SCREEN_TIME_VIOLATION
+  UNAUTHORIZED_APP
+}
+
+enum AlertStatus {
+  UNREAD
+  REVIEWED
+  RESOLVED
+  DISMISSED
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum DeviceType {
+  SMARTPHONE
+  TABLET
+  LAPTOP
+  DESKTOP
+  SMARTWATCH
+}
+
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+  SUSPENDED
+}
+
+model User {
+  id            String         @id @default(uuid())
+  email         String         @unique
+  passwordHash  String
+  name          String
+  role          Role           @default(PARENT)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  children      Child[]
+  devices       Device[]
+  alerts        Alert[]
+  refreshTokens RefreshToken[]
+
+  @@index([email])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+model Child {
+  id              String           @id @default(uuid())
+  name            String
+  age             Int
+  avatarUrl       String?
+  parentId        String
+  parent          User             @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  devices         Device[]
+  alerts          Alert[]
+  riskAssessments RiskAssessment[]
+
+  @@index([parentId])
+}
+
+model Device {
+  id        String       @id @default(uuid())
+  name      String
+  type      DeviceType   @default(SMARTPHONE)
+  status    DeviceStatus @default(ONLINE)
+  lastSeen  DateTime     @default(now())
+  childId   String?
+  child     Child?       @relation(fields: [childId], references: [id], onDelete: SetNull)
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  alerts    Alert[]
+
+  @@index([userId])
+  @@index([childId])
+}
+
+model Alert {
+  id             String          @id @default(uuid())
+  type           AlertType
+  severity       Severity        @default(MEDIUM)
+  message        String
+  status         AlertStatus     @default(UNREAD)
+  metadata       Json?
+  userId         String
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  childId        String?
+  child          Child?          @relation(fields: [childId], references: [id], onDelete: SetNull)
+  deviceId       String?
+  device         Device?         @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  evidence       EvidenceMedia[]
+  riskAssessment RiskAssessment?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([userId, status])
+  @@index([createdAt])
+  @@index([childId])
+  @@index([deviceId])
+}
+
+model EvidenceMedia {
+  id           String   @id @default(uuid())
+  publicId     String   @unique
+  url          String
+  secureUrl    String
+  format       String
+  resourceType String   @default("image")
+  bytes        Int
+  width        Int?
+  height       Int?
+  uploadedAt   DateTime @default(now())
+
+  alertId      String
+  alert        Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
+
+  @@index([alertId])
+}
+
+model RiskAssessment {
+  id                String      @id @default(uuid())
+  score             Int         @default(0)
+  riskLevel         RiskLevel   @default(LOW)
+  safetyScore       Int         @default(100)
+  cyberbullyingRisk Int         @default(0)
+  contentRisk       Int         @default(0)
+  predatorRisk      Int         @default(0)
+  screenTimeRisk    Int         @default(0)
+  model             String      @default("guardianai-rule-engine")
+  modelVersion      String      @default("1.0.0")
+  explanation       String?
+  summaryNotes      String?
+
+  childId           String?
+  child             Child?      @relation(fields: [childId], references: [id], onDelete: Cascade)
+
+  alertId           String?     @unique
+  alert             Alert?      @relation(fields: [alertId], references: [id], onDelete: Cascade)
+
+  calculatedAt      DateTime    @default(now())
+
+  @@index([childId])
+  @@index([alertId])
+  @@index([calculatedAt])
+}

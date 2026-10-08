@@ -3,9 +3,21 @@ backend/venv/
 
 # Secrets
 backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+*.env
+*.env.*
+*.env.local
+*.env.*.local
+!*.env.example
+!**/.env.example
 
 # Node
 frontend/node_modules/
+backend/node_modules/
+frontend/dist/
+backend/dist/
 
 # Cache
 __pycache__/
@@ -16,3 +28,9 @@ backend/uploads/
 
 # OS
 .DS_Store
+
+# Local PostgreSQL
+.pg_bin/
+.pg_data/
+*.log
+scratch/
